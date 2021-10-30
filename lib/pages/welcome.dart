@@ -35,15 +35,15 @@ class _WelcomePageState extends State<WelcomePage> {
                       fontSize: 40,
                     ),
                   ),
-                  // Text(
-                  //   'Drivers',
-                  //   textAlign: TextAlign.center,
-                  //   style: TextStyle(
-                  //     color: Colors.blue.shade50,
-                  //     fontWeight: FontWeight.bold,
-                  //     fontSize: 20,
-                  //   ),
-                  // ),
+                  Text(
+                    'Drivers',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.blue.shade50,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 20,
+                    ),
+                  ),
                 ],
               )),
           Positioned(
