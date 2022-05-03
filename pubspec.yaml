@@ -48,6 +48,12 @@ dependencies:
   # Http
   dio: ^4.0.1
 
+  # For state management
+  provider: ^5.0.0
+
+  # For socket connection to server
+  socket_io_client: ^1.0.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

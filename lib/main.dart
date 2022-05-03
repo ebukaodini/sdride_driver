@@ -2,10 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:sdride_driver/pages/map.dart';
 import 'package:sdride_driver/pages/welcome.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:provider/provider.dart';
+import 'package:sdride_driver/providers/Driver.dart';
+import 'package:sdride_driver/providers/Order.dart';
+import 'package:sdride_driver/providers/Rider.dart';
 
 Future main() async {
   await dotenv.load(fileName: ".env");
-  runApp(MyApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (context) => Driver()),
+        ChangeNotifierProvider(create: (context) => Rider()),
+        ChangeNotifierProvider(create: (context) => Order()),
+      ],
+      child: MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -16,6 +29,12 @@ class MyApp extends StatelessWidget {
       title: 'SD Ride',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
+        textTheme: TextTheme(
+          bodyText2: TextStyle(
+            color: Colors.black45,
+            fontSize: 16,
+          ),
+        ),
         primaryColor: Colors.white,
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ButtonStyle(

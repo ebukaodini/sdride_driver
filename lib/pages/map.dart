@@ -1,12 +1,19 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
+import 'package:provider/provider.dart';
+import 'package:sdride_driver/models/driver.model.dart';
+import 'package:sdride_driver/models/order.model.dart';
 import 'package:sdride_driver/pages/directions_model.dart';
 import 'package:sdride_driver/pages/directions_repository.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:location/location.dart';
+import 'package:sdride_driver/providers/Driver.dart';
+import 'package:sdride_driver/providers/Order.dart';
+import 'package:sdride_driver/providers/Rider.dart';
 import 'package:sdride_driver/utils/functions.dart';
 import 'package:sdride_driver/widgets/error.dart';
+import 'package:sdride_driver/widgets/notice.dart';
 import 'package:sdride_driver/widgets/success.dart';
 
 class MapPage extends StatefulWidget {
@@ -28,7 +35,6 @@ class _MapPageState extends State<MapPage> {
   BitmapDescriptor? destinationMarker;
   BitmapDescriptor? travelDriverMarker;
   Marker? travelRiderMarker;
-
   bool isPageReady = false;
 
   @override
@@ -47,10 +53,18 @@ class _MapPageState extends State<MapPage> {
     loadMarkers();
     await getCurrentLocation();
     setInitialCameraLocation();
-    // await getChangingLocation();
+    await getChangingLocation();
     // showRidersRequestingMyRideOnMap();
     setState(() => isPageReady = true);
-    // await setTravelInfoForDriversOnMap();
+    await fetchOrders();
+  }
+
+  Future fetchOrders() async {
+    Order pOrder = context.read<Order>();
+    Driver pDriver = context.read<Driver>();
+    if (pOrder.orders!.isEmpty == true && pDriver.driver!.isOnline! == true) {
+      await pOrder.getOrders();
+    }
   }
 
   void setInitialCameraLocation() {
@@ -63,13 +77,39 @@ class _MapPageState extends State<MapPage> {
   }
 
   Future getChangingLocation() async {
-    location.onLocationChanged.listen((LocationData currentLocation) {
+    Driver pDriver = context.read<Driver>();
+    location.onLocationChanged.listen((LocationData currentLocation) async {
       setState(() {
-        travelOrigin =
+        myLocation =
             LatLng(currentLocation.latitude!, currentLocation.longitude!);
       });
+      await pDriver.updateLocation(myLocation!);
+      Rider pRider = context.read<Rider>();
+      if (selectedOrder!.riderId != null) {
+        LatLng pos = await pRider.getLocation(selectedOrder!.riderId!);
+        // update the marker
+        setState(() {
+          riderLocation = pos;
+          travelRiderMarker = Marker(
+            markerId: MarkerId("rider_${selectedOrder!.riderId!}"),
+            infoWindow: const InfoWindow(title: 'Rider'),
+            icon: riderMarker!,
+            position: pos,
+            zIndex: 999,
+          );
+        });
+
+        // get travel details
+        Directions directions = await getDirection(pos, myLocation);
+        setState(() {
+          pickupDirectionInfo =
+              "Rider is ${directions.totalDistance} away. You should get to rider in ${directions.totalDuration}.";
+        });
+      }
     });
   }
+
+  updateMarker() {}
 
   Future getCurrentLocation() async {
     try {
@@ -104,6 +144,9 @@ class _MapPageState extends State<MapPage> {
               LatLng(_locationData.latitude!, _locationData.longitude!);
         },
       );
+
+      Driver pDriver = context.read<Driver>();
+      await pDriver.updateLocation(myLocation!);
     } catch (e) {
       error(context, "Get Location Error: " + e.toString());
     }
@@ -154,161 +197,173 @@ class _MapPageState extends State<MapPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        alignment: Alignment.center,
-        children: [
-          if (isPageReady == true)
-            GoogleMap(
-              myLocationEnabled: true,
-              indoorViewEnabled: true,
-              zoomControlsEnabled: false,
-              initialCameraPosition: initialCameraPosition!,
-              onMapCreated: (controller) => _googleMapController = controller,
-              markers: {
-                if (travelRiderMarker != null) travelRiderMarker!,
-                if (travelInfo != null && showTravelDirection == true)
-                  if (travelOriginMarker != null) travelOriginMarker!,
-                if (travelInfo != null && showTravelDirection == true)
-                  if (travelDestinationMarker != null) travelDestinationMarker!,
-              },
-              polylines: {
-                // travel polyline
-                if (travelInfo != null && showTravelDirection == true)
-                  Polyline(
-                    polylineId: const PolylineId('travel_polyline'),
-                    color: Colors.blue.shade900,
-                    width: 10,
-                    startCap: Cap.roundCap,
-                    endCap: Cap.roundCap,
-                    jointType: JointType.round,
-                    points: travelInfo!.polylinePoints!
-                        .map((e) => LatLng(e.latitude, e.longitude))
-                        .toList(),
+    return Consumer<Driver>(builder: (BuildContext context, pDriver, child) {
+      return Consumer<Order>(builder: (BuildContext context, pOrder, child) {
+        return Consumer<Rider>(builder: (BuildContext context, pRider, child) {
+          return Scaffold(
+            body: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (isPageReady == true)
+                  GoogleMap(
+                    myLocationEnabled: true,
+                    indoorViewEnabled: true,
+                    zoomControlsEnabled: false,
+                    initialCameraPosition: initialCameraPosition!,
+                    onMapCreated: (controller) =>
+                        _googleMapController = controller,
+                    markers: {
+                      if (travelRiderMarker != null) travelRiderMarker!,
+                      if (travelInfo != null && showTravelDirection == true)
+                        if (travelOriginMarker != null) travelOriginMarker!,
+                      if (travelInfo != null && showTravelDirection == true)
+                        if (travelDestinationMarker != null)
+                          travelDestinationMarker!,
+                    },
+                    polylines: {
+                      // travel polyline
+                      if (travelInfo != null && showTravelDirection == true)
+                        Polyline(
+                          polylineId: const PolylineId('travel_polyline'),
+                          color: Colors.blue.shade900,
+                          width: 10,
+                          startCap: Cap.roundCap,
+                          endCap: Cap.roundCap,
+                          jointType: JointType.round,
+                          points: travelInfo!.polylinePoints!
+                              .map((e) => LatLng(e.latitude, e.longitude))
+                              .toList(),
+                        ),
+
+                      if (pickupInfo != null && showPickupDirection == true)
+                        Polyline(
+                          polylineId: const PolylineId('pickup_polyline'),
+                          color: Colors.green,
+                          width: 15,
+                          patterns: [
+                            PatternItem.dot,
+                            PatternItem.gap(20),
+                          ],
+                          startCap: Cap.roundCap,
+                          endCap: Cap.roundCap,
+                          jointType: JointType.round,
+                          points: pickupInfo!.polylinePoints!
+                              .map((e) => LatLng(e.latitude, e.longitude))
+                              .toList(),
+                        ),
+                    },
                   ),
 
-                if (pickupInfo != null && showPickupDirection == true)
-                  Polyline(
-                    polylineId: const PolylineId('pickup_polyline'),
-                    color: Colors.green,
-                    width: 15,
-                    patterns: [
-                      PatternItem.dot,
-                      PatternItem.gap(20),
-                    ],
-                    startCap: Cap.roundCap,
-                    endCap: Cap.roundCap,
-                    jointType: JointType.round,
-                    points: pickupInfo!.polylinePoints!
-                        .map((e) => LatLng(e.latitude, e.longitude))
-                        .toList(),
+                // show loading while page is loading
+                if (isPageReady == false)
+                  Center(
+                    child: CircularProgressIndicator(),
                   ),
-              },
-            ),
 
-          // show loading while page is loading
-          if (isPageReady == false)
-            Center(
-              child: CircularProgressIndicator(),
-            ),
-
-          if (isPageReady == true)
-            Positioned(
-              top: 50,
-              left: 20,
-              child: FloatingActionButton(
-                backgroundColor: Theme.of(context).primaryColor,
-                foregroundColor: Colors.black,
-                onPressed: () => Navigator.pop(context),
-                child: Icon(Icons.arrow_back_rounded),
-              ),
-            ),
-
-          if (isPageReady == true)
-            Positioned(
-              top: 120,
-              left: 20,
-              child: FloatingActionButton(
-                backgroundColor: Theme.of(context).primaryColor,
-                foregroundColor: Colors.black,
-                onPressed: () => toggleDriverOnlineOffline(),
-                child: Icon(
-                  CupertinoIcons.dot_radiowaves_left_right,
-                  color: driverIsOnline ? Colors.green : Colors.black54,
-                  size: 35,
-                ),
-              ),
-            ),
-
-          if (isPageReady == true)
-            // display the info distance and time estimation info
-            if (travelInfo != null && showTravelDirection == true)
-              Positioned(
-                top: 50,
-                right: 20,
-                height: 55,
-                width: screen(context).width * 0.6,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(50),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Colors.black26,
-                        offset: Offset(0, 2),
-                        blurRadius: 6.0,
-                      )
-                    ],
+                if (isPageReady == true)
+                  Positioned(
+                    top: 50,
+                    left: 20,
+                    child: FloatingActionButton(
+                      backgroundColor: Theme.of(context).primaryColor,
+                      foregroundColor: Colors.black,
+                      onPressed: () => Navigator.pop(context),
+                      child: Icon(Icons.arrow_back_rounded),
+                    ),
                   ),
-                  child: Align(
-                    alignment: Alignment.center,
-                    child: Text(
-                      '${travelInfo!.totalDistance}, ${travelInfo!.totalDuration}',
-                      style: const TextStyle(
-                        fontSize: 18.0,
-                        fontWeight: FontWeight.w600,
+
+                if (isPageReady == true)
+                  Positioned(
+                    top: 120,
+                    left: 20,
+                    child: FloatingActionButton(
+                      backgroundColor: Theme.of(context).primaryColor,
+                      foregroundColor: Colors.black,
+                      onPressed: () => toggleDriverOnlineOffline(),
+                      child: Icon(
+                        CupertinoIcons.dot_radiowaves_left_right,
+                        color: pDriver.driver!.isOnline!
+                            ? Colors.green
+                            : Colors.black54,
+                        size: 35,
                       ),
                     ),
                   ),
-                ),
-              ),
 
-          DraggableScrollableSheet(
-            initialChildSize: 0.30,
-            minChildSize: 0.30,
-            maxChildSize: 0.40,
-            builder: (BuildContext context, ScrollController scrollController) {
-              return SingleChildScrollView(
-                controller: scrollController,
-                child: Container(
-                  margin: EdgeInsets.only(top: 10),
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.shade300,
-                        blurRadius: 5.0,
-                        spreadRadius: 5,
-                        offset: Offset.zero,
+                if (isPageReady == true)
+                  // display the info distance and time estimation info
+                  if (travelInfo != null && showTravelDirection == true)
+                    Positioned(
+                      top: 50,
+                      right: 20,
+                      height: 55,
+                      width: screen(context).width * 0.6,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(50),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black26,
+                              offset: Offset(0, 2),
+                              blurRadius: 6.0,
+                            )
+                          ],
+                        ),
+                        child: Align(
+                          alignment: Alignment.center,
+                          child: Text(
+                            '${travelInfo!.totalDistance}, ${travelInfo!.totalDuration}',
+                            style: const TextStyle(
+                              fontSize: 18.0,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
                       ),
-                    ],
-                    color: Colors.white,
-                  ),
-                  child: bottomSheetPage == BottomSheetPage.SELECT_ORDER
-                      ? selectOrder()
-                      : bottomSheetPage == BottomSheetPage.CONFIRM_RIDE
-                          ? showConfirmRide()
-                          : bottomSheetPage == BottomSheetPage.PICKUP_RIDER
-                              ? showPickupRider()
-                              : showStartRide(),
+                    ),
+
+                DraggableScrollableSheet(
+                  initialChildSize: 0.30,
+                  minChildSize: 0.30,
+                  maxChildSize: 0.40,
+                  builder: (BuildContext context,
+                      ScrollController scrollController) {
+                    return SingleChildScrollView(
+                      controller: scrollController,
+                      child: Container(
+                        margin: EdgeInsets.only(top: 10),
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.grey.shade300,
+                              blurRadius: 5.0,
+                              spreadRadius: 5,
+                              offset: Offset.zero,
+                            ),
+                          ],
+                          color: Colors.white,
+                        ),
+                        child: bottomSheetPage == BottomSheetPage.SELECT_ORDER
+                            ? showSelectOrder()
+                            : bottomSheetPage == BottomSheetPage.CONFIRM_RIDE
+                                ? showConfirmRide()
+                                : bottomSheetPage ==
+                                        BottomSheetPage.PICKUP_RIDER
+                                    ? showPickupRider()
+                                    : showStartRide(),
+                      ),
+                    );
+                  },
                 ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
+              ],
+            ),
+          );
+        });
+      });
+    });
   }
 
   void addRiderMarker(LatLng pos, riderId) {
@@ -384,9 +439,7 @@ class _MapPageState extends State<MapPage> {
 
       setState(() {
         pickupInfo = directions;
-        selectedOrder['rider']['pickupInfo'] =
-            "${directions.totalDistance}, ${directions.totalDuration}";
-        selectedOrder['rider']['detailedPickupInfo'] =
+        pickupDirectionInfo =
             "Rider is ${directions.totalDistance} away. You should get to rider in ${directions.totalDuration}.";
         showPickupDirection = true;
       });
@@ -415,8 +468,8 @@ class _MapPageState extends State<MapPage> {
   // Bottom Sheets
   bool showDestination = true;
   bool showPickupDirection = false;
+  String? pickupDirectionInfo;
   double? zoomLevel = 16;
-
   LatLng? travelOrigin;
   LatLng? myLocation;
   LatLng? travelDestination;
@@ -424,7 +477,7 @@ class _MapPageState extends State<MapPage> {
   Marker? travelDestinationMarker;
   bool showTravelDirection = false;
   BottomSheetPage bottomSheetPage = BottomSheetPage.SELECT_ORDER;
-  dynamic selectedOrder;
+  OrderModel? selectedOrder;
   LatLng? riderLocation;
   Directions? pickupInfo;
 
@@ -484,8 +537,24 @@ class _MapPageState extends State<MapPage> {
     },
   ];
 
+  Future toggleDriverOnlineOffline() async {
+    try {
+      Driver pDriver = context.read<Driver>();
+      Order pOrder = context.read<Order>();
+      await pDriver.updateOnline().then((value) async {
+        if (pDriver.driver!.isOnline! == true) {
+          await pOrder.getOrders();
+        }
+        success(context,
+            "Driver is ${pDriver.driver!.isOnline! ? 'Online' : 'Offline'}");
+      });
+    } catch (e) {
+      error(context, e.toString());
+    }
+  }
+
   // Select Order Sheet
-  Widget selectOrder() {
+  Widget showSelectOrder() {
     return Column(
       children: <Widget>[
         SizedBox(height: 12),
@@ -517,13 +586,33 @@ class _MapPageState extends State<MapPage> {
   Widget renderOrders() {
     List<Widget> tiles = [];
     int count = 0;
-    rideOrders.forEach(
-      (order) {
-        tiles.add(orderTile(order));
-        if (count != rideOrders.length - 1) tiles.add(Divider());
-        count++;
-      },
-    );
+    Order pOrder = context.read<Order>();
+    Driver pDriver = context.read<Driver>();
+    if (pOrder.orders!.isEmpty == false && pDriver.driver!.isOnline! == true) {
+      pOrder.orders!.forEach(
+        (OrderModel order) {
+          tiles.add(orderTile(order));
+          if (count != pOrder.orders!.length - 1) tiles.add(Divider());
+          count++;
+        },
+      );
+      tiles.addAll([
+        SizedBox(height: 20),
+        if (pDriver.driver!.isOnline! == true)
+          SizedBox(
+            width: screen(context).width * 0.9,
+            child: ElevatedButton(
+              onPressed: () async {
+                await pOrder.getOrders();
+              },
+              child: Text('Reload'),
+            ),
+          ),
+        SizedBox(height: 20)
+      ]);
+    } else {
+      tiles.add(noOrder());
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -537,7 +626,7 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  ListTile orderTile(order) {
+  ListTile orderTile(OrderModel order) {
     return ListTile(
       leading: Icon(
         Icons.pin_drop_outlined,
@@ -545,7 +634,7 @@ class _MapPageState extends State<MapPage> {
         size: 30,
       ),
       title: Text(
-        order['name'],
+        order.destinationDetails!['name'],
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
@@ -554,7 +643,7 @@ class _MapPageState extends State<MapPage> {
         ),
       ),
       subtitle: Text(
-        order['address'],
+        order.destinationDetails!['address'],
         style: TextStyle(
           fontSize: 16,
           color: Colors.black45,
@@ -565,10 +654,36 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  Future chooseOrder(order) async {
+  Widget noOrder() {
+    Driver pDriver = context.read<Driver>();
+    return Container(
+      width: screen(context).width * 0.9,
+      child: Column(
+        children: [
+          Text('No ride orders. Make sure you are online.'),
+          if (pDriver.driver!.isOnline! == true) Text('Click to refresh'),
+          SizedBox(height: 20),
+          if (pDriver.driver!.isOnline! == true)
+            SizedBox(
+              width: screen(context).width * 0.9,
+              child: ElevatedButton(
+                onPressed: () async {
+                  Order pOrder = context.read<Order>();
+                  await pOrder.getOrders();
+                },
+                child: Text('Reload'),
+              ),
+            ),
+          SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  Future chooseOrder(OrderModel order) async {
     setState(() {
-      travelOrigin = LatLng(order['rider']['lat'], order['rider']['lng']);
-      travelDestination = LatLng(order['lat'], order['lng']);
+      travelOrigin = order.origin;
+      travelDestination = order.destination;
       selectedOrder = order;
     });
 
@@ -648,7 +763,7 @@ class _MapPageState extends State<MapPage> {
             width: 60,
           ),
           title: Text(
-            "${selectedOrder['name']}",
+            "${selectedOrder?.destinationDetails!['name']}",
             maxLines: 1,
             textAlign: TextAlign.start,
             overflow: TextOverflow.ellipsis,
@@ -659,7 +774,7 @@ class _MapPageState extends State<MapPage> {
             ),
           ),
           subtitle: Text(
-            "${selectedOrder['address']}",
+            "${selectedOrder?.destinationDetails!['address']}",
             maxLines: 1,
             textAlign: TextAlign.start,
             overflow: TextOverflow.ellipsis,
@@ -684,7 +799,7 @@ class _MapPageState extends State<MapPage> {
         SizedBox(
           width: screen(context).width * 0.9,
           child: ElevatedButton(
-            onPressed: confirmRide,
+            onPressed: () => confirmRide(),
             child: Text('Confirm Ride'),
           ),
         ),
@@ -694,26 +809,32 @@ class _MapPageState extends State<MapPage> {
   }
 
   Future confirmRide() async {
-    setState(() {
-      riderLocation =
-          LatLng(selectedOrder['rider']['lat'], selectedOrder['rider']['lng']);
-    });
+    try {
+      Order pOrder = context.read<Order>();
+      Driver pDriver = context.read<Driver>();
+      // Rider pRider = context.read<Rider>();
 
-    addRiderMarker(riderLocation!, selectedOrder['rider']['id']);
+      await pOrder
+          .acceptOrder(pDriver.driver!.id!, selectedOrder!.id!)
+          .then((value) async {
+        // set riders location
+        setState(() {
+          riderLocation = selectedOrder?.origin;
+          // pRider.rider = selectedOrder?.riderId
+        });
 
-    // show pickup trip details
-    await setPickupDirection();
+        addRiderMarker(riderLocation!, selectedOrder?.riderId);
 
-    setState(() {
-      bottomSheetPage = BottomSheetPage.PICKUP_RIDER;
-    });
-  }
+        // show pickup trip details
+        await setPickupDirection();
 
-  void toggleDriverOnlineOffline() {
-    setState(() {
-      driverIsOnline = !driverIsOnline;
-      success(context, "Driver is ${driverIsOnline ? 'Online' : 'Offline'}");
-    });
+        setState(() {
+          bottomSheetPage = BottomSheetPage.PICKUP_RIDER;
+        });
+      });
+    } catch (e) {
+      error(context, e.toString());
+    }
   }
 
   // Show Pickup Rider Sheet
@@ -778,7 +899,7 @@ class _MapPageState extends State<MapPage> {
             ),
           ),
           subtitle: Text(
-            selectedOrder['rider']['detailedPickupInfo'],
+            pickupDirectionInfo!,
             maxLines: 2,
             overflow: TextOverflow.visible,
             // textAlign: TextAlign.center,
@@ -856,7 +977,7 @@ class _MapPageState extends State<MapPage> {
             fit: BoxFit.cover,
           ),
           title: Text(
-            selectedOrder['name'],
+            selectedOrder?.destinationDetails!['name'],
             maxLines: 1,
             textAlign: TextAlign.start,
             overflow: TextOverflow.ellipsis,
@@ -867,7 +988,7 @@ class _MapPageState extends State<MapPage> {
             ),
           ),
           subtitle: Text(
-            selectedOrder['address'],
+            selectedOrder?.destinationDetails!['address'],
             style: TextStyle(
               fontSize: 16,
               color: Colors.black45,

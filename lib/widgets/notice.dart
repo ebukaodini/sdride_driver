@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:sdride_driver/utils/functions.dart';
 
-void notice(BuildContext context, String msg) {
+void notice(BuildContext context, String msg, {int seconds = 5}) {
   FToast ftoast = FToast();
   ftoast.init(context);
   ftoast.showToast(
     gravity: ToastGravity.BOTTOM,
-    toastDuration: Duration(seconds: 5),
+    toastDuration: Duration(seconds: seconds),
     child: Container(
       width: screen(context).width * 0.8,
       padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
